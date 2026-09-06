@@ -33,6 +33,10 @@ DEVICE_TYPES: dict[int, DeviceEntry] = {
         name="Door/Window Sensor",
         model="CGH1",
     ),
+    0x78D1: DeviceEntry(
+        name="Door/Window Sensor",
+        model="MC-COMM",
+    ),
     0x0A83: DeviceEntry(
         name="Motion/Light Sensor",
         model="CGPR1",
@@ -119,13 +123,26 @@ DEVICE_TYPES: dict[int, DeviceEntry] = {
         name="Temperature/Humidity Sensor",
         model="MJWSD05MMC",
     ),
+    0x4C47: DeviceEntry(
+        name="Temperature/Humidity Sensor",
+        model="MJWSD05MMC",
+    ),
     0x55B5: DeviceEntry(
+        name="Temperature/Humidity Sensor",
+        model="MJWSD06MMC",
+    ),
+    0x5BEA: DeviceEntry(
         name="Temperature/Humidity Sensor",
         model="MJWSD06MMC",
     ),
     0x5DB1: DeviceEntry(
         name="Temperature/Humidity Sensor",
         model="MBS17",
+    ),
+    0x78DB: DeviceEntry(
+        name="Temperature/Humidity Sensor",
+        model="ESM787",
+        manufacturer="Yanmi",
     ),
     0x098B: DeviceEntry(
         name="Door/Window Sensor",
@@ -191,6 +208,10 @@ DEVICE_TYPES: dict[int, DeviceEntry] = {
         name="Flood Detector",
         model="SJWS01LM",
     ),
+    0x6375: DeviceEntry(
+        name="Water Leak Sensor 2",
+        model="SJWS02LM",
+    ),
     0x045C: DeviceEntry(
         name="Smart Kettle",
         model="V-SK152",
@@ -218,6 +239,10 @@ DEVICE_TYPES: dict[int, DeviceEntry] = {
     0x098C: DeviceEntry(
         name="Door Lock",
         model="XMZNMST02YD",
+    ),
+    0x0599: DeviceEntry(
+        name="Door Lock",
+        model="MJZNMS03LM",
     ),
     0x0784: DeviceEntry(
         name="Door Lock",
@@ -356,18 +381,28 @@ DEVICE_TYPES: dict[int, DeviceEntry] = {
 SLEEPY_DEVICE_MODELS = {
     "CGH1",
     "ES3",
+    "MC-COMM",
     "ES5BB",
     "PS1BB",
     "JTYJGD03MI",
     "MCCGQ02HL",
+    "MS1BB(MI)",
     "RTCGQ02LM",
     "MMC-W505",
     "RS1BB(MI)",
+    "SJWS02LM",
     "XMOSB01XS",
     "MJTZC01YM",
     "MJTZC03YM",
     "HS1BB(MI)",
     "XMPIRO2SXS",
+    "XMPIRO2GSXS",
     "M2456B1",
     "M2457B1",
+}
+
+
+S400_MODELS = {
+    "MJTZC01YM",
+    "MJTZC03YM",
 }

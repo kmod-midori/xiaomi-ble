@@ -39,7 +39,7 @@ from .const import (
     ExtendedBinarySensorDeviceClass,
     ExtendedSensorDeviceClass,
 )
-from .devices import DEVICE_TYPES, SLEEPY_DEVICE_MODELS
+from .devices import DEVICE_TYPES, S400_MODELS, SLEEPY_DEVICE_MODELS
 from .events import EventDeviceKeys
 from .locks import BLE_LOCK_ACTION, BLE_LOCK_ERROR, BLE_LOCK_METHOD
 
@@ -136,7 +136,7 @@ def obj0006(
             result = "match_failed"
         elif match_byte == 0x02:
             result = "timeout"
-        elif match_byte == 0x033:
+        elif match_byte == 0x03:
             result = "low_quality_too_light_fuzzy"
         elif match_byte == 0x04:
             result = "insufficient_area"
@@ -1097,9 +1097,33 @@ def obj4806(
     xobj: bytes, device: XiaomiBluetoothDeviceData, device_type: str
 ) -> dict[str, Any]:
     """Moisture"""
+    if len(xobj) != 1:
+        return {}
+    if device_type == "SJWS02LM":
+        device.update_predefined_binary_sensor(
+            BinarySensorDeviceClass.MOISTURE,
+            xobj[0] > 0,
+            key="bottom_submersion",
+            name="Bottom submersion",
+        )
+        return {}
     device.update_predefined_binary_sensor(
         BinarySensorDeviceClass.MOISTURE, xobj[0] > 0
     )
+    return {}
+
+
+def obj487b(
+    xobj: bytes, device: XiaomiBluetoothDeviceData, device_type: str
+) -> dict[str, Any]:
+    """Top splash sensor state for Xiaomi Water Leak Sensor 2."""
+    if len(xobj) == 1 and device_type == "SJWS02LM":
+        device.update_predefined_binary_sensor(
+            BinarySensorDeviceClass.MOISTURE,
+            xobj[0] > 0,
+            key="top_splash",
+            name="Top splash",
+        )
     return {}
 
 
@@ -1109,6 +1133,20 @@ def obj4808(
     """Humidity"""
     humi = FLOAT_STRUCT(xobj)[0]
     device.update_predefined_sensor(SensorLibrary.HUMIDITY__PERCENTAGE, round(humi, 1))
+    return {}
+
+
+def obj480c(
+    xobj: bytes, device: XiaomiBluetoothDeviceData, device_type: str
+) -> dict[str, Any]:
+    """Door/Window state for zhiee.magnet.mc01 and similar devices."""
+    if len(xobj) != 1:
+        return {}
+    state = xobj[0]
+    if state == 0x00:
+        device.update_predefined_binary_sensor(BinarySensorDeviceClass.OPENING, True)
+    elif state == 0x01:
+        device.update_predefined_binary_sensor(BinarySensorDeviceClass.OPENING, False)
     return {}
 
 
@@ -1235,7 +1273,7 @@ def obj4a08(
     xobj: bytes, device: XiaomiBluetoothDeviceData, device_type: str
 ) -> dict[str, Any]:
     """Motion detected with Illuminance in lux"""
-    (illum,) = struct.unpack("f", xobj)
+    (illum,) = struct.unpack("<f", xobj)
     device.update_predefined_binary_sensor(BinarySensorDeviceClass.MOTION, True)
     device.update_predefined_sensor(SensorLibrary.LIGHT__LIGHT_LUX, illum)
     return {}
@@ -1394,9 +1432,39 @@ def obj4a1a(
         device.update_predefined_binary_sensor(BinarySensorDeviceClass.OPENING, True)
         device.update_binary_sensor(
             key=ExtendedBinarySensorDeviceClass.DOOR_LEFT_OPEN,
-            native_value=False,
+            native_value=True,
             device_class=ExtendedBinarySensorDeviceClass.DOOR_LEFT_OPEN,
             name="Door left open",
+        )
+    return {}
+
+
+def obj4a68(
+    xobj: bytes, device: XiaomiBluetoothDeviceData, device_type: str
+) -> dict[str, Any]:
+    """Water alarm/clear event for Xiaomi Water Leak Sensor 2.
+
+    The device does not always include its persistent 0x4806/0x487B state in
+    the same advertisement, so these transition events also reconcile the two
+    binary sensor values.
+    """
+    if len(xobj) != 1 or device_type != "SJWS02LM":
+        return {}
+
+    event_type = xobj[0]
+    if event_type in (0, 1):
+        device.update_predefined_binary_sensor(
+            BinarySensorDeviceClass.MOISTURE,
+            event_type == 0,
+            key="bottom_submersion",
+            name="Bottom submersion",
+        )
+    elif event_type in (2, 3):
+        device.update_predefined_binary_sensor(
+            BinarySensorDeviceClass.MOISTURE,
+            event_type == 2,
+            key="top_splash",
+            name="Top splash",
         )
     return {}
 
@@ -1691,7 +1759,14 @@ def obj560d(
     xobj: bytes, device: XiaomiBluetoothDeviceData, device_type: str
 ) -> dict[str, Any]:
     """Double button press"""
-    if device_type not in ["KS1", "KS1BP"]:
+    if device_type not in ["KS1", "KS1BP", "KS2BB"]:
+        return {}
+    if device_type == "KS2BB":
+        device.fire_event(
+            key=EventDeviceKeys.BUTTON,
+            event_type="double_press",
+            event_properties=None,
+        )
         return {}
     button = xobj[0]
     if button_name := QUAD_BUTTON_TO_NAME[button]:
@@ -1707,7 +1782,14 @@ def obj560e(
     xobj: bytes, device: XiaomiBluetoothDeviceData, device_type: str
 ) -> dict[str, Any]:
     """Long button press"""
-    if device_type not in ["KS1", "KS1BP"]:
+    if device_type not in ["KS1", "KS1BP", "KS2BB"]:
+        return {}
+    if device_type == "KS2BB":
+        device.fire_event(
+            key=EventDeviceKeys.BUTTON,
+            event_type="long_press",
+            event_properties=None,
+        )
         return {}
     button = xobj[0]
     if button_name := QUAD_BUTTON_TO_NAME[button]:
@@ -1784,11 +1866,28 @@ def obj6e16(
 ) -> dict[str, Any]:
     """Body Composition Scale S400"""
     profile_id, data, _ = struct.unpack("<BII", xobj)
-    if not data:
-        return {}
     mass = data & 0x7FF
     heart_rate = (data >> 11) & 0x7F
     impedance = data >> 18
+
+    device.update_sensor(
+        key=ExtendedSensorDeviceClass.PROFILE_ID,
+        name="Profile ID",
+        device_class=ExtendedSensorDeviceClass.PROFILE_ID,
+        native_unit_of_measurement=None,
+        native_value=profile_id,
+    )
+
+    if mass == 0 and heart_rate == 0 and impedance == 0:
+        # Person stepped off the scale → reset
+        device.update_binary_sensor(
+            key=ExtendedBinarySensorDeviceClass.STABILIZED,
+            name="Stabilized",
+            device_class=ExtendedBinarySensorDeviceClass.STABILIZED,
+            native_value=False,
+        )
+        return {}
+
     if mass != 0:
         device.update_predefined_sensor(SensorLibrary.MASS__MASS_KILOGRAMS, mass / 10)
     if 0 < heart_rate < 127:
@@ -1799,26 +1898,46 @@ def obj6e16(
             native_unit_of_measurement="bpm",
             native_value=heart_rate + 50,
         )
-    if impedance != 0:
-        if mass != 0:
-            device.update_predefined_sensor(
-                SensorLibrary.IMPEDANCE__OHM, impedance / 10
-            )
-        else:
-            device.update_sensor(
-                key=ExtendedSensorDeviceClass.IMPEDANCE_LOW,
-                name="Impedance Low",
-                device_class=ExtendedSensorDeviceClass.IMPEDANCE_LOW,
-                native_unit_of_measurement=Units.OHM,
-                native_value=impedance / 10,
-            )
-    device.update_sensor(
-        key=ExtendedSensorDeviceClass.PROFILE_ID,
-        name="Profile ID",
-        device_class=ExtendedSensorDeviceClass.PROFILE_ID,
-        native_unit_of_measurement=None,
-        native_value=profile_id,
-    )
+
+    if mass == 0 and heart_rate == 0:
+        # Last packet → high frequency 250 kHz → impedance_high → stabilized
+        device.update_sensor(
+            key=ExtendedSensorDeviceClass.IMPEDANCE_HIGH,
+            name="Impedance High",
+            device_class=ExtendedSensorDeviceClass.IMPEDANCE_HIGH,
+            native_unit_of_measurement=Units.OHM,
+            native_value=impedance / 10,
+        )
+        device.update_binary_sensor(
+            key=ExtendedBinarySensorDeviceClass.STABILIZED,
+            name="Stabilized",
+            device_class=ExtendedBinarySensorDeviceClass.STABILIZED,
+            native_value=True,
+        )
+    elif impedance != 0:
+        # Packet with weight → low frequency 50 kHz → impedance_low
+        device.update_sensor(
+            key=ExtendedSensorDeviceClass.IMPEDANCE_LOW,
+            name="Impedance Low",
+            device_class=ExtendedSensorDeviceClass.IMPEDANCE_LOW,
+            native_unit_of_measurement=Units.OHM,
+            native_value=impedance / 10,
+        )
+        device.update_binary_sensor(
+            key=ExtendedBinarySensorDeviceClass.STABILIZED,
+            name="Stabilized",
+            device_class=ExtendedBinarySensorDeviceClass.STABILIZED,
+            native_value=False,
+        )
+    else:
+        # Packet with weight only → with socks → stabilized
+        device.update_binary_sensor(
+            key=ExtendedBinarySensorDeviceClass.STABILIZED,
+            name="Stabilized",
+            device_class=ExtendedBinarySensorDeviceClass.STABILIZED,
+            native_value=True,
+        )
+
     return {}
 
 
@@ -1861,6 +1980,7 @@ xiaomi_dataobject_dict = {
     0x4805: obj4805,
     0x4806: obj4806,
     0x4808: obj4808,
+    0x480C: obj480c,
     0x4818: obj4818,
     0x483C: obj483c,
     0x483D: obj483d,
@@ -1868,6 +1988,7 @@ xiaomi_dataobject_dict = {
     0x484E: obj484e,
     0x4851: obj4851,
     0x4852: obj4852,
+    0x487B: obj487b,
     0x4A01: obj4a01,
     0x4A08: obj4a08,
     0x4A0C: obj4a0c,
@@ -1877,6 +1998,7 @@ xiaomi_dataobject_dict = {
     0x4A12: obj4a12,
     0x4A13: obj4a13,
     0x4A1A: obj4a1a,
+    0x4A68: obj4a68,
     0x4C01: obj4c01,
     0x4C02: obj4c02,
     0x4C03: obj4c03,
@@ -2084,11 +2206,16 @@ class XiaomiBluetoothDeviceData(BluetoothData):
             device = DEVICE_TYPES[device_id]
         except KeyError:
             _LOGGER.info(
-                "BLE ADV from UNKNOWN Xiaomi device: MAC: %s, ADV: %s",
-                source_mac,
+                "BLE ADV from UNKNOWN Xiaomi device: MAC: %s, product_id: %s, ADV: %s",
+                to_mac(source_mac),
+                hex(device_id),
                 data.hex(),
             )
-            _LOGGER.debug("Unknown Xiaomi device found. Data: %s", data.hex())
+            _LOGGER.debug(
+                "Unknown Xiaomi device found. product_id: %s, Data: %s",
+                hex(device_id),
+                data.hex(),
+            )
             return False
 
         device_type = device.model
@@ -2150,6 +2277,14 @@ class XiaomiBluetoothDeviceData(BluetoothData):
         if frctrl_object_include == 0:
             # data does not contain Object
             _LOGGER.debug("Advertisement doesn't contain payload, adv: %s", data.hex())
+            # S400 idle packet — reset stabilized
+            if device_type in S400_MODELS:
+                self.update_binary_sensor(
+                    key=ExtendedBinarySensorDeviceClass.STABILIZED,
+                    name="Stabilized",
+                    device_class=ExtendedBinarySensorDeviceClass.STABILIZED,
+                    native_value=False,
+                )
             return False
 
         self.pending = False
@@ -2251,6 +2386,15 @@ class XiaomiBluetoothDeviceData(BluetoothData):
         mass_stabilized = bool(int(control_byte & (1 << 5)))
         mass_removed = bool(int(control_byte & (1 << 7)))
 
+        # Reset stabilization state when scale is empty / user steps off
+        if mass == 0:
+            self.update_binary_sensor(
+                key=ExtendedBinarySensorDeviceClass.STABILIZED,
+                name="Stabilized",
+                device_class=ExtendedBinarySensorDeviceClass.STABILIZED,
+                native_value=False,
+            )
+
         if mass_in_kilograms:
             # sensor advertises kg * 200
             mass /= 200
@@ -2264,8 +2408,25 @@ class XiaomiBluetoothDeviceData(BluetoothData):
         self.update_predefined_sensor(
             SensorLibrary.MASS_NON_STABILIZED__MASS_KILOGRAMS, mass
         )
-        if mass_stabilized and not mass_removed:
+
+        # Handling stabilization sensor based on weight status
+        if mass_stabilized and not mass_removed and mass > 0:
             self.update_predefined_sensor(SensorLibrary.MASS__MASS_KILOGRAMS, mass)
+            self.update_binary_sensor(
+                key=ExtendedBinarySensorDeviceClass.STABILIZED,
+                name="Stabilized",
+                device_class=ExtendedBinarySensorDeviceClass.STABILIZED,
+                native_value=True,
+            )
+        else:
+            # Scale is measuring / not stabilized yet
+            if mass > 0:
+                self.update_binary_sensor(
+                    key=ExtendedBinarySensorDeviceClass.STABILIZED,
+                    name="Stabilized",
+                    device_class=ExtendedBinarySensorDeviceClass.STABILIZED,
+                    native_value=False,
+                )
 
         return True
 
@@ -2300,6 +2461,15 @@ class XiaomiBluetoothDeviceData(BluetoothData):
         mass_removed = bool(int(control_flags[8]))
         impedance_stabilized = bool(int(control_flags[14]))
 
+        # Reset stabilization state when scale is empty / user steps off
+        if mass == 0:
+            self.update_binary_sensor(
+                key=ExtendedBinarySensorDeviceClass.STABILIZED,
+                name="Stabilized",
+                device_class=ExtendedBinarySensorDeviceClass.STABILIZED,
+                native_value=False,
+            )
+
         if mass_in_kilograms:
             # sensor advertises kg * 200
             mass /= 200
@@ -2313,10 +2483,28 @@ class XiaomiBluetoothDeviceData(BluetoothData):
         self.update_predefined_sensor(
             SensorLibrary.MASS_NON_STABILIZED__MASS_KILOGRAMS, mass
         )
-        if mass_stabilized and not mass_removed:
+
+        # Handling stabilization sensor based on weight status
+        if mass_stabilized and not mass_removed and mass > 0:
             self.update_predefined_sensor(SensorLibrary.MASS__MASS_KILOGRAMS, mass)
             if impedance_stabilized:
                 self.update_predefined_sensor(SensorLibrary.IMPEDANCE__OHM, impedance)
+
+            self.update_binary_sensor(
+                key=ExtendedBinarySensorDeviceClass.STABILIZED,
+                name="Stabilized",
+                device_class=ExtendedBinarySensorDeviceClass.STABILIZED,
+                native_value=True,
+            )
+        else:
+            # Scale is measuring / not stabilized yet
+            if mass > 0:
+                self.update_binary_sensor(
+                    key=ExtendedBinarySensorDeviceClass.STABILIZED,
+                    name="Stabilized",
+                    device_class=ExtendedBinarySensorDeviceClass.STABILIZED,
+                    native_value=False,
+                )
 
         return True
 
